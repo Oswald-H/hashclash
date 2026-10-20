@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 
-export BINDIR=$(dirname $0)/../bin
+source "$(dirname -- "${BASH_SOURCE[0]}")/hashclash_paths.sh"
+export BINDIR="$HASHCLASH_BIN"
 export HELPER=$BINDIR/md5_diffpathhelper
 export FORWARD=$BINDIR/md5_diffpathforward
 export BACKWARD=$BINDIR/md5_diffpathbackward
@@ -60,6 +61,35 @@ function auto_kill_connect
 	fi
 }
 
+# Find an example collision and propagate the failure of the helper: a
+# failing pipeline would otherwise be reported as success because 'tee' is
+# the last command of the pipeline.
+function findcollision
+{
+	logfile="$1"
+	inputfile="$2"
+	$HELPER $diff --findcollision --inputfile1 $inputfile 2>&1 | tee $logfile
+	status=${PIPESTATUS[0]}
+	if [ $status -ne 0 ]; then
+		echo "Error: collision finding failed with exit status $status, see $logfile" >&2
+	fi
+	return $status
+}
+
+# The collision blocks are concatenated below and a collision is only complete
+# with both of them. An unmatched glob would be passed to 'cat' as a literal
+# filename, so check for the blocks before anything is concatenated: a helper
+# that returns 0 without writing them must not be treated as a success.
+function checkcollisionblocks
+{
+	for block in ./data/coll1_* ./data/coll2_*; do
+		if [ ! -f "$block" ]; then
+			echo "Error: $block is missing, collision finding produced no collision blocks" >&2
+			exit 1
+		fi
+	done
+}
+
 #global loop that ensures that the script executes successfully
 while true; do
 
@@ -109,11 +139,12 @@ while true; do
 
 
 	#find example collision
-	$HELPER $diff --findcollision --inputfile1 data/bestpath.bin.gz 2>&1 | tee logs/collfind.log
+	findcollision logs/collfind.log data/bestpath.bin.gz || exit 1
 
 ################## SECOND NEAR-COLLISION BLOCK PAIR #########################
 
 	# swap msg1 and msg2 to use opposing signs as first block
+	checkcollisionblocks
 	cat data/$prefixfile.base ./data/coll1_* > ./data/file2.bin
 	cat data/$prefixfile.base ./data/coll2_* > ./data/file1.bin
 	mv ./data/coll1_* ./data/nc1_coll1.bin
@@ -138,8 +169,9 @@ while true; do
 	if [ ! -s data/bestpath.bin.gz ]; then let datalower=$((2*$datalower)); echo "Second step failed. Restarting"; sleep 2; continue; fi
 
 	#find example collision
-	$HELPER $diff --findcollision --inputfile1 data/bestpath.bin.gz 2>&1 | tee logs/collfind2.log
+	findcollision logs/collfind2.log data/bestpath.bin.gz || exit 1
 
+	checkcollisionblocks
 	cat data/file1.bin data/coll1_* > collision2.bin
 	cat data/file2.bin data/coll2_* > collision1.bin
 	md5sum collision1.bin collision2.bin

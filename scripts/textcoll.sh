@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 
-export BINDIR=$(dirname $0)/../bin
+source "$(dirname -- "${BASH_SOURCE[0]}")/hashclash_paths.sh"
+export BINDIR="$HASHCLASH_BIN"
 export HELPER=$BINDIR/md5_diffpathhelper
 export TEXTCOLL=$BINDIR/md5_textcoll
 
-export DIFFPATH=$BINDIR/../src/md5textcoll/path2.txt
+export DIFFPATH="$HASHCLASH_SCRIPT_DIR/md5_text_path.txt"
 MDIFF="--diffm5 11"
 
 prefixfile=$1
@@ -31,7 +32,7 @@ SECONDBLOCKBYTES='--byte8 B --byte9 y --byte10 M --byte11 a --byte12 r --byte13 
 
 # First convert the differential path from text to binary for the attack
 if [ ! -f textcoll_path.bin.gz ]; then
-	$HELPER $MDIFF --pathfromtext --inputfile1 $DIFFPATH --outputfile1 textcoll_path.bin.gz || exit 1
+	$HELPER $MDIFF --pathfromtext --inputfile1 "$DIFFPATH" --outputfile1 textcoll_path.bin.gz || exit 1
 fi
 
 

@@ -1,0 +1,140 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 25,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "cacheVariables": {
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+      }
+    },
+    {
+      "name": "dev",
+      "inherits": "base",
+      "displayName": "Developer build (Debug + tests)",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "HASHCLASH_BUILD_TESTS": "ON"
+      }
+    },
+    {
+      "name": "dev-asan",
+      "inherits": "dev",
+      "displayName": "Developer build with AddressSanitizer",
+      "cacheVariables": {
+        "HASHCLASH_ENABLE_ASAN": "ON"
+      }
+    },
+    {
+      "name": "dev-tsan",
+      "inherits": "dev",
+      "displayName": "Developer build with ThreadSanitizer",
+      "cacheVariables": {
+        "HASHCLASH_ENABLE_TSAN": "ON"
+      }
+    },
+    {
+      "name": "dev-ubsan",
+      "inherits": "dev",
+      "displayName": "Developer build with UndefinedBehaviorSanitizer",
+      "cacheVariables": {
+        "HASHCLASH_ENABLE_UBSAN": "ON"
+      }
+    },
+    {
+      "name": "dev-werror",
+      "inherits": "dev",
+      "displayName": "Developer build with warnings as errors",
+      "cacheVariables": {
+        "HASHCLASH_WARNINGS_AS_ERRORS": "ON"
+      }
+    },
+    {
+      "name": "release",
+      "inherits": "base",
+      "displayName": "Release build",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "HASHCLASH_ENABLE_LTO": "ON"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "common",
+      "hidden": true,
+      "jobs": 2
+    },
+    {
+      "name": "dev",
+      "inherits": "common",
+      "configurePreset": "dev"
+    },
+    {
+      "name": "dev-asan",
+      "inherits": "common",
+      "configurePreset": "dev-asan"
+    },
+    {
+      "name": "dev-tsan",
+      "inherits": "common",
+      "configurePreset": "dev-tsan"
+    },
+    {
+      "name": "dev-ubsan",
+      "inherits": "common",
+      "configurePreset": "dev-ubsan"
+    },
+    {
+      "name": "dev-werror",
+      "inherits": "common",
+      "configurePreset": "dev-werror"
+    },
+    {
+      "name": "release",
+      "inherits": "common",
+      "configurePreset": "release"
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "common",
+      "hidden": true,
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "dev",
+      "inherits": "common",
+      "configurePreset": "dev"
+    },
+    {
+      "name": "dev-asan",
+      "inherits": "common",
+      "configurePreset": "dev-asan"
+    },
+    {
+      "name": "dev-tsan",
+      "inherits": "common",
+      "configurePreset": "dev-tsan"
+    },
+    {
+      "name": "dev-ubsan",
+      "inherits": "common",
+      "configurePreset": "dev-ubsan"
+    },
+    {
+      "name": "dev-werror",
+      "inherits": "common",
+      "configurePreset": "dev-werror"
+    }
+  ]
+}

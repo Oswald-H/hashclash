@@ -1,0 +1,15 @@
+CompileFlags:
+  CompilationDatabase: build/dev
+
+Diagnostics:
+  # Strict unused-include removal breaks TUs that rely on transitive includes.
+  UnusedIncludes: None
+
+---
+# CUDA files are compiled by CMake only when HASHCLASH_ENABLE_CUDA is enabled.
+If:
+  PathMatch: .*\.cu
+CompileFlags:
+  Add:
+    - -x
+    - cuda

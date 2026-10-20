@@ -27,3 +27,14 @@
 *.exe
 *.out
 *.app
+
+# CMake build trees and generated compilation databases
+/build/
+compile_commands.json
+/.cache/clangd/
+
+# Runtime outputs from the README examples
+/work/
+
+# vcpkg manifest-mode install trees (CMake-driven ones live under build/)
+vcpkg_installed/

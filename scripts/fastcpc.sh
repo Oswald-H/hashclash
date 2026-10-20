@@ -1,5 +1,7 @@
 #!/bin/bash
 
+source "$(dirname -- "${BASH_SOURCE[0]}")/hashclash_paths.sh"
+
 PATHTYPERANGE=2
 HYBRIDBITS=0
 MAXBLOCKS=7
@@ -16,7 +18,7 @@ TTT=12
 # To fine-tune BLOCK_TIMEOUT for a particular machine use the following procedure:
 #   1) set BLOCK_TIMEOUT to 3600 or larger
 #   2) run 20 attempts and save logs:
-#      $> for ((i=0; i<20; ++i)); do ./fastcpc.sh ../README.md ../LICENSE.txt > cpc$i.log 2>&1; done
+#      $> for ((i=0; i<20; ++i)); do ./fastcpc.sh ../README.md ../LICENSE > cpc$i.log 2>&1; done
 #   3) Parse logs for near-collision block durations:
 #      $> grep "NC-BLOCK.*FINISHED" cpc*/*.log | cut -d: -f3 | cut -ds -f1 | sort -g
 #   4) Choose appropriate cut-off timeout at the end
@@ -34,10 +36,10 @@ BIRTHDAY_GLOBAL_CONFIG="--pathtyperange $PATHTYPERANGE --hybridbits $HYBRIDBITS 
 WORKDIR=`pwd`
 
 # this is the directory of the script itself within 'hashclash/scripts/'
-SCRIPTDIR=$(dirname $0)
+SCRIPTDIR="$HASHCLASH_SCRIPT_DIR"
 
 # from SCRIPTDIR we derive the 'hashclash/bin' directory where all hashclash binaries reside
-HASHCLASHBIN=$SCRIPTDIR/../bin
+HASHCLASHBIN="$HASHCLASH_BIN"
 
 function logthis
 {
@@ -46,7 +48,9 @@ function logthis
 	shift 2
 	if [ "$CPCTIMESTAMP" = "" ]; then
 		CPCTIMESTAMP=`date +%s`
-		DATESTR=`date -Is`
+		# 'date -Is' is not understood by the BSD date of macOS, which
+		# errored out and left this empty; +FORMAT works everywhere.
+		DATESTR=`date +%Y-%m-%dT%H:%M:%S%z`
 	else
 		DATESTR=+$(( `date +%s` - $CPCTIMESTAMP ))s
 	fi
@@ -269,7 +273,14 @@ for (( i=0; ; ++i)); do
 	fi
 
 	logthis 0 "NC-BLOCK $i" "Starting connect process in background ..."
-	HALFTHREADS=$((`nproc`/2))
+	CPUS="$(getconf _NPROCESSORS_ONLN 2>/dev/null || printf '1')"
+	case "$CPUS" in
+		''|*[!0-9]*) CPUS=1 ;;
+	esac
+	HALFTHREADS=$((CPUS / 2))
+	if [ "$HALFTHREADS" -lt 1 ]; then
+		HALFTHREADS=1
+	fi
 	logthis 2 "NC-BLOCK $i" "Running command: $HASHCLASHBIN/md5_diffpathconnect --threads $HALFTHREADS -w workdir$i -t $TTT --inputfilelow workdir$i/paths$(($TTT-1))_0of1.bin.gz.done --inputfilehigh $UPPERPATH > workdir$i/connect.log &"
 	INPUTFILELOW=workdir$i/paths$(($TTT-1))_0of1.bin.gz
 	$HASHCLASHBIN/md5_diffpathconnect --threads $HALFTHREADS -w workdir$i -t $TTT --inputfilelow $INPUTFILELOW.done --inputfilehigh $UPPERPATH > workdir$i/connect.log 2>&1 &

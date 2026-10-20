@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 
-export BINDIR=$(dirname $0)/../bin
+source "$(dirname -- "${BASH_SOURCE[0]}")/hashclash_paths.sh"
+export BINDIR="$HASHCLASH_BIN"
 export BIRTHDAYSEARCH=$BINDIR/md5_birthdaysearch
 export HELPER=$BINDIR/md5_diffpathhelper
 export FORWARD=$BINDIR/md5_diffpathforward
 export BACKWARD=$BINDIR/md5_diffpathbackward
 export CONNECT=$BINDIR/md5_diffpathconnect
-export CPUS=`cat /proc/cpuinfo | grep "^processor" | wc -l`
+export CPUS="$(getconf _NPROCESSORS_ONLN 2>/dev/null || printf '1')"
 if [ ! -z $MAXCPUS ]; then
 	if [ $CPUS -gt $MAXCPUS ]; then
 		export CPUS=$MAXCPUS
@@ -42,7 +43,7 @@ fi
 if [ "$3" = "" ] ; then
 	# check for CUDA / AVX256 threads
 	echo -n "Detecting worklevel..."
-	worklevel=`$BIRTHDAYSEARCH --inputfile1 "$file1" --inputfile2 "$file2" --hybridbits 0 --pathtyperange 2 --maxblocks 9 --maxmemory 100 --threads $CPUS --cuda_enable |& grep "^Work" -m1 | head -n1 | cut -d'(' -f2 | cut -d'.' -f1`
+	worklevel=`$BIRTHDAYSEARCH --inputfile1 "$file1" --inputfile2 "$file2" --hybridbits 0 --pathtyperange 2 --maxblocks 9 --maxmemory 100 --threads $CPUS --cuda_enable 2>&1 | grep "^Work" -m1 | head -n1 | cut -d'(' -f2 | cut -d'.' -f1`
 	echo ": $worklevel"
 	if [ $worklevel -ge 31 ]; then
 		$BIRTHDAYSEARCH --inputfile1 "$file1" --inputfile2 "$file2" --hybridbits 0 --pathtyperange 2 --maxblocks 7 --maxmemory 4000 --threads $CPUS --cuda_enable
@@ -88,6 +89,29 @@ function testcoll {
 	return 1
 }
 
+function killworkers
+{
+	# 'killall -r' is a GNU extension: the BSD killall of macOS rejects it
+	# with 'unknown signal r' and terminated nothing, so the md5_* worker
+	# processes kept running. Match the command line of our own binaries
+	# instead, which both platforms support.
+	if ! pkill -f "$BINDIR/md5_" &>/dev/null; then
+		local jobline jobpid index=0
+		local -a jobpids=()
+		while IFS= read -r jobpid; do
+			jobpids+=("$jobpid")
+		done < <(jobs -p 2>/dev/null)
+		while IFS= read -r jobline; do
+			if [[ "$jobline" == *"$BINDIR/md5_"* ||
+				"$jobline" == *'$BINDIR/md5_'* ]]; then
+				kill "${jobpids[$index]}" &>/dev/null
+			fi
+			index=$((index + 1))
+		done < <(jobs 2>/dev/null)
+	fi
+	return 0
+}
+
 function doconnect {
 	let c=0
 
@@ -108,14 +132,42 @@ function doconnect {
 }
 
 function docollfind {
-	$HELPER -w $1 --findcoll $2/bestpaths.bin.gz --threads $CPUS |& tee $2/collfind.log &
-	CPID=$!
-	while true; do
-		if testcoll $1 ; then break; fi
+	# Keep the helper PID and exit status separate from the log consumer.
+	local logdir helperpid logpid status logstatus found=0 oldterm oldint
+	logdir=$(mktemp -d "$1/.collfind.XXXXXX") || return 1
+	mkfifo "$logdir/output" || { rmdir "$logdir"; return 1; }
+	oldterm=$(trap -p TERM)
+	oldint=$(trap -p INT)
+	tee "$2/collfind.log" < "$logdir/output" &
+	logpid=$!
+	"$HELPER" -w "$1" --findcollision "$2/bestpaths.bin.gz" --threads "$CPUS" > "$logdir/output" 2>&1 &
+	helperpid=$!
+	trap 'kill "$helperpid" "$logpid" 2>/dev/null; wait "$helperpid" "$logpid" 2>/dev/null; rm -f "$logdir/output"; rmdir "$logdir"; exit 143' TERM
+	trap 'kill "$helperpid" "$logpid" 2>/dev/null; wait "$helperpid" "$logpid" 2>/dev/null; rm -f "$logdir/output"; rmdir "$logdir"; exit 130' INT
+	while kill -0 "$helperpid" 2>/dev/null; do
+		if testcoll "$1"; then
+			# Allow the helper to finish writing both collision blocks.
+			sleep 3
+			kill "$helperpid" 2>/dev/null
+			found=1
+			break
+		fi
 		sleep 1
 	done
-	sleep 3
-	kill $CPID &>/dev/null
+	wait "$helperpid" 2>/dev/null
+	status=$?
+	wait "$logpid"
+	logstatus=$?
+	rm -f "$logdir/output"
+	rmdir "$logdir"
+	trap - TERM INT
+	eval "$oldterm"
+	eval "$oldint"
+	if [ "$logstatus" -ne 0 ]; then return "$logstatus"; fi
+	if [ "$found" -eq 1 ]; then return 0; fi
+	if [ "$status" -ne 0 ]; then return "$status"; fi
+	# A clean exit without a collision is still a failed search.
+	testcoll "$1"
 }
 
 function dostepk {
@@ -129,7 +181,7 @@ function dostepk {
 
 	echo $$ > workdir$k/pid
 	set -o pipefail
-	$HELPER -w workdir$k --startnearcollision file1_$k.bin file2_$k.bin --pathtyperange 2 |& tee workdir$k/start.log
+	$HELPER -w workdir$k --startnearcollision file1_$k.bin file2_$k.bin --pathtyperange 2 2>&1 | tee workdir$k/start.log
 	if [[ $? -ne 0 ]]; then
 	    touch workdir$k/killed
 	    exit
@@ -137,12 +189,15 @@ function dostepk {
 
 	cp *.cfg workdir$k
 
-	doforward workdir$k |& tee workdir$k/forward.log
-	dobackward workdir$k |& tee workdir$k/backward.log
+	doforward workdir$k 2>&1 | tee workdir$k/forward.log
+	dobackward workdir$k 2>&1 | tee workdir$k/backward.log
 
-	doconnect workdir$k |& tee workdir$k/connect.log
+	doconnect workdir$k 2>&1 | tee workdir$k/connect.log
 
-	docollfind workdir$k workdir$k/connect
+	docollfind workdir$k workdir$k/connect || {
+		touch workdir$k/killed
+		return 1
+	}
 
 	for f in workdir$k/coll1_*; do
 		if [ -e `echo $f | sed s/coll1/coll2/` ]; then
@@ -226,13 +281,13 @@ while true; do
 	auto_kill workdir$k $AUTO_KILL_TIME &
 	autokillerpid=$!
 	mainpid=$$
-	trap "kill $autokillerpid &>/dev/null; pkill -KILL -P $mainpid &>/dev/null; killall -r md5_ &>/dev/null; exit" TERM INT KILL
+	trap "kill $autokillerpid &>/dev/null; pkill -KILL -P $mainpid &>/dev/null; killworkers; exit" TERM INT KILL
 
 	# Start the computation
 	rm -f step$k.log
 	(dostepk $k 2>&1 &) | tee step$k.log
 	kill $autokillerpid &>/dev/null
-	killall -r md5_ &>/dev/null
+	killworkers
 
 	# Check if the termination was completed or killed
 	if [[ -f workdir$k/killed ]]; then
@@ -253,5 +308,5 @@ notify "Process completed in $runtime minutes ($backtracks backtracks)."
 # kill any pending thing
 rm md5diffpath*.cfg md5diffpath*.template
 pkill -P $$ &>/dev/null
-killall -r md5_ &>/dev/null
+killworkers
 exit
